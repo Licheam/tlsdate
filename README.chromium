@@ -1,0 +1,6 @@
+This is a fork of ioerror's tlsdate(1) <https://github.com/ioerror/tlsdate>. It
+is licensed (as upstream is) under a BSD-style license which can be found in the
+LICENSE file.
+
+For docs on our use of tlsdate, see
+<https://sites.google.com/a/chromium.org/dev/developers/design-documents/time-sources>.
