@@ -6,7 +6,12 @@
 
 set -e
 
-exec autoreconf -ivf && \
+if [ ! -d config ];
+then
+  mkdir config;
+fi
+
+exec autoreconf -ivf -I src -I config && \
 aclocal && \
 autoheader && \
 autoconf && \

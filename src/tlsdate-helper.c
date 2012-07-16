@@ -73,7 +73,7 @@ know:
  * the system time without running as root or another privileged user.
  */
 
-#include "tlsdate-config.h"
+#include "../config/tlsdate-config.h"
 
 #include <stdarg.h>
 #include <stdint.h>
@@ -94,15 +94,24 @@ know:
 #include <openssl/evp.h>
 
 /** Name of user that we feel safe to run SSL handshake with. */
+#ifndef UNPRIV_USER
 #define UNPRIV_USER "nobody"
+#endif
+#ifndef UNPRIV_GROUP
 #define UNPRIV_GROUP "nogroup"
+#endif
 
 // We should never accept a time before we were compiled
 // We measure in seconds since the epoch - eg: echo `date '+%s'`
 // We set this manually to ensure others can reproduce a build;
 // automation of this will make every build different!
-#define RECENT_COMPILE_DATE (uint32_t) 1328610583
+#ifndef RECENT_COMPILE_DATE
+#define RECENT_COMPILE_DATE (uint32_t) 1342323666
+#endif
+
+#ifndef MAX_REASONABLE_TIME
 #define MAX_REASONABLE_TIME (uint32_t) 1999991337
+#endif
 
 // After the duration of the TLS handshake exceeds this threshold
 // (in msec), a warning is printed.
@@ -117,6 +126,8 @@ static const char *host;
 static const char *port;
 
 static const char *protocol;
+
+static const char *certdir;
 
 /** helper function to print message and die */
 static void
@@ -152,12 +163,13 @@ verb (const char *fmt, ...)
  * @param time_map where to store the current time
  */
 static void
-run_ssl (uint32_t *time_map)
+run_ssl (uint32_t *time_map, int time_is_an_illusion)
 {
   BIO *s_bio;
-  BIO *c_bio;
   SSL_CTX *ctx;
   SSL *ssl;
+  uint32_t compiled_time = RECENT_COMPILE_DATE;
+  uint32_t max_reasonable_time = MAX_REASONABLE_TIME;
 
   SSL_load_error_strings();
   SSL_library_init();
@@ -183,9 +195,7 @@ run_ssl (uint32_t *time_map)
 
   if (ca_racket)
   {
-    // For google specifically:
-    // SSL_CTX_load_verify_locations(ctx, "/etc/ssl/certs/Equifax_Secure_CA.pem", NULL);
-    if (1 != SSL_CTX_load_verify_locations(ctx, NULL, "/etc/ssl/certs/"))
+    if (1 != SSL_CTX_load_verify_locations(ctx, NULL, certdir))
       fprintf(stderr, "SSL_CTX_load_verify_locations failed\n");
   }
 
@@ -199,8 +209,8 @@ run_ssl (uint32_t *time_map)
        (1 != BIO_set_conn_port(s_bio, port)) )
     die ("Failed to initialize connection to `%s:%s'\n", host, port);
 
-  if (NULL == (c_bio = BIO_new_fp(stdout, BIO_NOCLOSE)))
-    die ("FIXME: error message");
+  if (NULL == BIO_new_fp(stdout, BIO_NOCLOSE))
+    die ("BIO_new_fp returned error, possibly: %s", strerror(errno));
 
   // This should run in seccomp
   // eg:     prctl(PR_SET_SECCOMP, 1);
@@ -210,12 +220,37 @@ run_ssl (uint32_t *time_map)
     die ("SSL handshake failed\n");
   // Verify the peer certificate against the CA certs on the local system
   if (ca_racket) {
-    X509 *x509;
     long ssl_verify_result;
 
-    if (NULL == (x509 = SSL_get_peer_certificate(ssl)) )
+    if (NULL == SSL_get_peer_certificate(ssl))
+    {
       die ("Getting SSL certificate failed\n");
-
+    }
+    if (time_is_an_illusion)
+    {
+      // XXX TODO: If we want to trust the remote system for time,
+      // can we just read that time out of the remote system and if the
+      // cert verifies, decide that the time is reasonable?
+      // Such a process seems to indicate that a once valid cert would be
+      // forever valid - we stopgap that by ensuring it isn't less than
+      // the latest compiled_time and isn't above max_reasonable_time...
+      // XXX TODO: Solve eternal question about the Chicken and the Egg...
+      verb("V: freezing time for x509 verification\n");
+      memcpy(time_map, ssl->s3->server_random, sizeof (uint32_t));
+      if (compiled_time < ntohl( * time_map)
+          &&
+          ntohl(*time_map) < max_reasonable_time)
+      {
+        verb("V: remote peer provided: %d, prefered over compile time: %d\n",
+              ntohl( *time_map), compiled_time);
+        // In theory, we instruct verify to check if it _would be valid_ if the
+        // verification happened at ((time_t) ntohl(*time_map))
+        X509_VERIFY_PARAM_set_time(ctx->param, (time_t) ntohl(*time_map));
+      } else {
+        die("V: the remote server is a false ticker! server: %d compile: %d\n",
+             ntohl(*time_map), compiled_time);
+      }
+    }
     // In theory, we verify that the cert is valid
     ssl_verify_result = SSL_get_verify_result(ssl);
     switch (ssl_verify_result)
@@ -233,9 +268,8 @@ run_ssl (uint32_t *time_map)
   } else {
     verb ("V: Certificate verification skipped!\n");
   }
-
   // from /usr/include/openssl/ssl3.h
-  //  ssl->s3->server_random is an unsigned char of 32 bytes
+  //  ssl->s3->server_random is an unsigned char of 32 bits
   memcpy(time_map, ssl->s3->server_random, sizeof (uint32_t));
 }
 
@@ -295,18 +329,43 @@ main(int argc, char **argv)
   uint32_t *time_map;
   struct timeval start_timeval;
   struct timeval end_timeval;
+  struct timeval warp_time;
   int status;
   pid_t ssl_child;
   long long rt_time_ms;
   uint32_t server_time_s;
+  int setclock;
+  int showtime;
+  int timewarp;
+  int leap;
 
-  if (argc != 6)
+  if (argc != 11)
     return 1;
   host = argv[1];
   port = argv[2];
   protocol = argv[3];
+  certdir = argv[6];
   ca_racket = (0 != strcmp ("unchecked", argv[4]));
   verbose = (0 != strcmp ("quiet", argv[5]));
+  setclock = (0 == strcmp ("setclock", argv[7]));
+  showtime = (0 == strcmp ("showtime", argv[8]));
+  timewarp = (0 == strcmp ("timewarp", argv[9]));
+  leap = (0 == strcmp ("leapaway", argv[10]));
+
+  if (timewarp)
+  {
+    warp_time.tv_sec = RECENT_COMPILE_DATE;
+    warp_time.tv_usec = 0;
+    verb ("V: RECENT_COMPILE_DATE is %lu.%06lu\n",
+         (unsigned long)warp_time.tv_sec,
+         (unsigned long)warp_time.tv_usec);
+  }
+
+  /* We are not going to set the clock, thus no need to stay root */
+  if (0 == setclock && 0 == timewarp)
+  {
+    become_nobody ();
+  }
 
   time_map = mmap (NULL, sizeof (uint32_t),
        PROT_READ | PROT_WRITE,
@@ -314,16 +373,45 @@ main(int argc, char **argv)
   if (MAP_FAILED == time_map)
   {
     fprintf (stderr, "mmap failed: %s\n",
-       strerror (errno));
+             strerror (errno));
     return 1;
   }
 
   /* Get the current time from the system clock. */
   if (0 != gettimeofday(&start_timeval, NULL))
+  {
     die ("Failed to read current time of day: %s\n", strerror (errno));
+  }
+
   verb ("V: time is currently %lu.%06lu\n",
-  (unsigned long)start_timeval.tv_sec,
-  (unsigned long)start_timeval.tv_usec);
+       (unsigned long)start_timeval.tv_sec,
+       (unsigned long)start_timeval.tv_usec);
+
+  if (((unsigned long)start_timeval.tv_sec) < ((unsigned long)warp_time.tv_sec))
+  {
+    verb ("V: local clock time is less than RECENT_COMPILE_DATE\n");
+    if (timewarp)
+    {
+      verb ("V: Attempting to warp local clock into the future\n");
+      if (0 != settimeofday(&warp_time, NULL))
+      {
+        die ("setting time failed: %s (Attempted to set clock to %lu.%06lu)\n",
+        strerror (errno),
+        (unsigned long)warp_time.tv_sec,
+        (unsigned long)warp_time.tv_usec);
+      }
+      if (0 != gettimeofday(&start_timeval, NULL))
+      {
+        die ("Failed to read current time of day: %s\n", strerror (errno));
+      }
+      verb ("V: time is currently %lu.%06lu\n",
+           (unsigned long)start_timeval.tv_sec,
+           (unsigned long)start_timeval.tv_usec);
+      verb ("V: It's just a step to the left...\n");
+    }
+  } else {
+    verb ("V: time is greater than RECENT_COMPILE_DATE\n");
+  }
 
   /* initialize to bogus value, just to be on the safe side */
   *time_map = 0;
@@ -335,7 +423,7 @@ main(int argc, char **argv)
   if (0 == ssl_child)
   {
     become_nobody ();
-    run_ssl (time_map);
+    run_ssl (time_map, leap);
     (void) munmap (time_map, sizeof (uint32_t));
     _exit (0);
   } 
@@ -365,7 +453,19 @@ main(int argc, char **argv)
       "server or run it again\n", TLS_RTT_THRESHOLD);
   }
 
+  if (showtime)
+  {
+     struct tm  ltm;
+     time_t tim = server_time_s;
+     char       buf[256];
+
+     localtime_r(&tim, &ltm);
+     (void) strftime(buf, sizeof buf, "%a %b %e %H:%M:%S %Z %Y", &ltm);
+     fprintf(stdout, "%s\n", buf);
+  }
+
   /* finally, actually set the time */
+  if (setclock)
   {
     struct timeval server_time;
 
@@ -381,9 +481,10 @@ main(int argc, char **argv)
     if (server_time.tv_sec <= RECENT_COMPILE_DATE)
       die ("remote server is a false ticker!\n");
     if (0 != settimeofday(&server_time, NULL))
-      die ("setting time failed: %s\n", strerror (errno));
+      die ("setting time failed: %s (Difference from server is about %d)\n",
+     strerror (errno),
+     start_timeval.tv_sec - server_time_s);
+    verb ("V: setting time succeeded\n");
   }
-  verb ("V: setting time succeeded\n");
   return 0;
 }
-

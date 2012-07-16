@@ -73,7 +73,7 @@ know:
  * the system time without running as root or another privileged user.
  */
 
-#include "tlsdate-config.h"
+#include "../config/tlsdate-config.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -84,6 +84,7 @@ know:
 #define DEFAULT_HOST "www.ptb.de"
 #define DEFAULT_PORT "443"
 #define DEFAULT_PROTOCOL "tlsv1"
+#define DEFAULT_CERTDIR "/etc/ssl/certs"
 
 /** Return the proper commandline switches when the user needs information. */
 static void
@@ -92,10 +93,15 @@ usage(void)
   fprintf(stderr, "tlsdate usage:\n"
           " [-h|--help]\n"
           " [-s|--skip-verification]\n"
+          " [-n|--dont-set-clock]\n"
           " [-H|--host] [hostname|ip]\n"
           " [-p|--port] [port number]\n"
-          " [-P]--protocol] [sslv23|sslv3|tlsv1]\n"
-          " [-v|--verbose]\n");
+          " [-P|--protocol] [sslv23|sslv3|tlsv1]\n"
+          " [-C|--certdir] [dirname]\n"
+          " [-v|--verbose]\n"
+          " [-V|--showtime]\n"
+          " [-t|--timewarp]\n"
+          " [-l|--leap]\n");
 }
 
 
@@ -104,15 +110,25 @@ main(int argc, char **argv)
 {
   int verbose;
   int ca_racket;
+  int showtime;
+  int setclock;
   const char *host;
   const char *port;
   const char *protocol;
+  const char *certdir;
+  int timewarp;
+  int leap;
 
   host = DEFAULT_HOST;
   port = DEFAULT_PORT;
   protocol = DEFAULT_PROTOCOL;
+  certdir = DEFAULT_CERTDIR;
   verbose = 0;
   ca_racket = 1;
+  showtime = 0;
+  setclock = 1;
+  timewarp = 0;
+  leap = 0;
 
   while (1) {
     int option_index = 0;
@@ -121,26 +137,36 @@ main(int argc, char **argv)
     static struct option long_options[] =
       {
         {"verbose", 0, 0, 'v'},
+        {"showtime", 0, 0, 'V'},
         {"skip-verification", 0, 0, 's'},
         {"help", 0, 0, 'h'},
         {"host", 0, 0, 'H'},
         {"port", 0, 0, 'p'},
         {"protocol", 0, 0, 'P'},
+        {"dont-set-clock", 0, 0, 'n'},
+        {"certdir", 0, 0, 'C'},
+        {"timewarp", 0, 0, 't'},
+        {"leap", 0, 0, 'l'},
         {0, 0, 0, 0}
       };
 
-    c = getopt_long(argc, argv, "vshH:p:P:",
+    c = getopt_long(argc, argv, "vVshH:p:P:nC:tl",
                     long_options, &option_index);
     if (c == -1)
       break;
 
     switch (c) {
       case 'v': verbose = 1; break;
+      case 'V': showtime = 1; break;
       case 's': ca_racket = 0; break;
       case 'h': usage(); exit(1); break;
       case 'H': host = optarg; break;
       case 'p': port = optarg; break;
       case 'P': protocol = optarg; break;
+      case 'n': setclock = 0; break;
+      case 'C': certdir = optarg; break;
+      case 't': timewarp = 1; break;
+      case 'l': leap = 1; break;
       case '?': break;
       default : fprintf(stderr, "Unknown option!\n"); usage(); exit(1);
     }
@@ -165,8 +191,12 @@ main(int argc, char **argv)
     protocol,
     (ca_racket ? "racket" : "unchecked"),
     (verbose ? "verbose" : "quiet"),
+    certdir,
+    (setclock ? "setclock" : "dont-set-clock"),
+    (showtime ? "showtime" : "no-showtime"),
+    (timewarp ? "timewarp" : "no-fun"),
+    (leap ? "leapaway" : "holdfast"),
     NULL);
   perror("Failed to run tlsdate-helper");
   return 1;
 }
-
