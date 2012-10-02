@@ -345,8 +345,17 @@ int API main(int argc, char *argv[], char *envp[])
 		fatal("supplied base path is too long: '%s'", base_path);
 
 	/* grab a handle to /dev/rtc for sync_hwclock() */
-	if (should_sync_hwclock && (hwclock_fd = open("/dev/rtc", O_RDONLY)) < 0)
-		pfatal("can't open hwclock fd");
+	if (should_sync_hwclock) {
+		int i = 0;
+		const int kMaxTries = 10;
+		while ((hwclock_fd = open("/dev/rtc", O_RDONLY)) < 0
+		       && i < kMaxTries) {
+			sleep(1);
+			i++;
+		}
+		if (i == kMaxTries)
+			pfatal("can't open hwclock fd");
+	}
 
 	/* set up a netlink context if we need one */
 	if (should_netlink && routeup_setup(&rtc))
@@ -408,7 +417,6 @@ int API main(int argc, char *argv[], char *envp[])
 			info("tlsdate succeeded");
 			sync_and_save(hwclock_fd, should_sync_hwclock,
 			              should_save_disk);
-			break;
 		}
 	}
 
