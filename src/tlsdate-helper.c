@@ -322,45 +322,42 @@ xfree (void *ptr)
 }
 
 
-void
-openssl_time_callback (const SSL* ssl, int where, int ret)
+static int
+verify_with_server_time (X509_STORE_CTX *store_ctx, void *arg)
 {
-  if (where == SSL_CB_CONNECT_LOOP &&
-#if OPENSSL_VERSION_NUMBER < 0x10100000L
-      (ssl->state == SSL3_ST_CR_SRVR_HELLO_A || ssl->state == SSL3_ST_CR_SRVR_HELLO_B))
-#else
-      (SSL_get_state(ssl) == TLS_ST_CR_SRVR_HELLO))
-#endif
+  SSL *ssl = X509_STORE_CTX_get_ex_data (
+      store_ctx, SSL_get_ex_data_X509_STORE_CTX_idx());
+
+  // XXX TODO: If we want to trust the remote system for time,
+  // can we just read that time out of the remote system and if the
+  // cert verifies, decide that the time is reasonable?
+  // Such a process seems to indicate that a once valid cert would be
+  // forever valid - we stopgap that by ensuring it isn't less than
+  // the latest compiled_time and isn't above max_reasonable_time...
+  // XXX TODO: Solve eternal question about the Chicken and the Egg...
+  uint32_t compiled_time = RECENT_COMPILE_DATE;
+  uint32_t max_reasonable_time = MAX_REASONABLE_TIME;
+  uint32_t server_time;
+  verb ("V: freezing time for x509 verification\n");
+  SSL_get_server_random(ssl, (unsigned char *)&server_time,
+                        sizeof (uint32_t));
+  if (compiled_time < ntohl (server_time)
+      &&
+      ntohl (server_time) < max_reasonable_time)
     {
-      // XXX TODO: If we want to trust the remote system for time,
-      // can we just read that time out of the remote system and if the
-      // cert verifies, decide that the time is reasonable?
-      // Such a process seems to indicate that a once valid cert would be
-      // forever valid - we stopgap that by ensuring it isn't less than
-      // the latest compiled_time and isn't above max_reasonable_time...
-      // XXX TODO: Solve eternal question about the Chicken and the Egg...
-      uint32_t compiled_time = RECENT_COMPILE_DATE;
-      uint32_t max_reasonable_time = MAX_REASONABLE_TIME;
-      uint32_t server_time;
-      verb ("V: freezing time for x509 verification\n");
-      SSL_get_server_random(ssl, (unsigned char *)&server_time,
-                            sizeof (uint32_t));
-      if (compiled_time < ntohl (server_time)
-          &&
-          ntohl (server_time) < max_reasonable_time)
-        {
-          verb ("V: remote peer provided: %d, preferred over compile time: %d\n",
-                ntohl (server_time), compiled_time);
-          verb ("V: freezing time with X509_VERIFY_PARAM_set_time\n");
-          X509_VERIFY_PARAM_set_time (SSL_get0_param((SSL *)ssl),
-                                      (time_t) ntohl (server_time) + 86400);
-        }
-      else
-        {
-          die ("V: the remote server is a false ticker! server: %d compile: %d\n",
-               ntohl (server_time), compiled_time);
-        }
+      verb ("V: remote peer provided: %d, preferred over compile time: %d\n",
+           ntohl (server_time), compiled_time);
+      verb ("V: freezing time with X509_VERIFY_PARAM_set_time\n");
+      X509_STORE_CTX_set_time (
+          store_ctx, 0, (time_t) ntohl (server_time) + 86400);
     }
+  else
+    {
+      die ("V: the remote server is a false ticker! server: %d compile: %d\n",
+          ntohl (server_time), compiled_time);
+    }
+
+  return X509_verify_cert (store_ctx);
 }
 
 uint32_t
@@ -878,16 +875,18 @@ run_ssl (uint32_t *time_map, int time_is_an_illusion)
             }
         }
     }
+
+  if (time_is_an_illusion)
+    {
+      SSL_CTX_set_cert_verify_callback (ctx, verify_with_server_time, NULL);
+    }
+
   verb ("V: setting up connection to %s:%s\n", g_host, g_port);
   if (NULL == (s_bio = make_ssl_bio(ctx, g_host, g_port, g_proxy)))
     die ("SSL BIO setup failed\n");
   BIO_get_ssl (s_bio, &ssl);
   if (NULL == ssl)
     die ("SSL setup failed\n");
-  if (time_is_an_illusion)
-    {
-      SSL_set_info_callback (ssl, openssl_time_callback);
-    }
   SSL_set_mode (ssl, SSL_MODE_AUTO_RETRY);
   SSL_set_tlsext_host_name (ssl, g_host);
   if (NULL == BIO_new_fp (stdout, BIO_NOCLOSE))

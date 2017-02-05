@@ -79,7 +79,6 @@
 // To support our RFC 2595 wildcard verification
 #define RFC2595_MIN_LABEL_COUNT 3
 
-void openssl_time_callback (const SSL* ssl, int where, int ret);
 uint32_t get_certificate_keybits (EVP_PKEY *public_key);
 uint32_t check_cn (SSL *ssl, const char *hostname);
 uint32_t check_san (SSL *ssl, const char *hostname);
