@@ -79,19 +79,6 @@
 // To support our RFC 2595 wildcard verification
 #define RFC2595_MIN_LABEL_COUNT 3
 
-static int ca_racket;
-
-static const char *host;
-
-static const char *hostname_to_verify;
-
-static const char *port;
-
-static const char *protocol;
-
-static char *proxy;
-
-static const char *ca_cert_container;
 void openssl_time_callback (const SSL* ssl, int where, int ret);
 uint32_t get_certificate_keybits (EVP_PKEY *public_key);
 uint32_t check_cn (SSL *ssl, const char *hostname);

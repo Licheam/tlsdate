@@ -32,8 +32,8 @@ BIO *proxy_bio (BIO *test, const char *type)
 {
   BIO *proxy = BIO_new_proxy();
   BIO_proxy_set_type (proxy, type);
-  BIO_proxy_set_host (proxy, kTestHost);
-  BIO_proxy_set_port (proxy, TEST_PORT);
+  BIO_proxy_set_target_host (proxy, kTestHost);
+  BIO_proxy_set_target_port (proxy, TEST_PORT);
   BIO_push (proxy, test);
   return proxy;
 }

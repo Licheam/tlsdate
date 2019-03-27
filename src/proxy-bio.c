@@ -398,7 +398,7 @@ int API BIO_proxy_set_type (BIO *b, const char *type)
   return 0;
 }
 
-int API BIO_proxy_set_host (BIO *b, const char *host)
+int API BIO_proxy_set_target_host (BIO *b, const char *host)
 {
   struct proxy_ctx *ctx = b->ptr;
   if (strnlen (host, NI_MAXHOST) == NI_MAXHOST)
@@ -407,7 +407,7 @@ int API BIO_proxy_set_host (BIO *b, const char *host)
   return 0;
 }
 
-void API BIO_proxy_set_port (BIO *b, uint16_t port)
+void API BIO_proxy_set_target_port (BIO *b, uint16_t port)
 {
   struct proxy_ctx *ctx = b->ptr;
   ctx->port = port;

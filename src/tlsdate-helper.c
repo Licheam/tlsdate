@@ -75,11 +75,34 @@ know:
  */
 
 #include "config.h"
+
 #include "src/tlsdate-helper.h"
+
+#include <errno.h>
+#include <netdb.h>
+#include <stdlib.h>
+#include <sys/types.h>
+#include <sys/socket.h>
 
 #include "src/proxy-bio.h"
 #include "src/util.h"
 #include "src/compat/clock.h"
+
+static int g_ca_racket;
+
+static const char *g_ca_cert_container;
+
+// Target host to connect to.
+static const char *g_host;
+
+// Port to connect to on the target host.
+static const char *g_port;
+
+// The SSL/TLS protocol used
+static const char *g_protocol;
+
+// Proxy with format scheme://proxy_host:proxy_port.
+static char *g_proxy;
 
 static void
 validate_proxy_scheme (const char *scheme)
@@ -105,11 +128,15 @@ validate_proxy_host (const char *host)
 }
 
 static void
-validate_proxy_port (const char *port)
+validate_port (const char *port)
 {
-  while (*port)
-    if (!isdigit (*port++))
-      die ("invalid char in port\n");
+  if (!port)
+    return;
+  char *end;
+  const int kBase = 10;
+  unsigned long value = strtoul(port, &end, kBase);
+  if (errno != 0 || value > SHRT_MAX || value == 0 || *end != '\0')
+    die("invalid port %s\n", port);
 }
 
 static void
@@ -130,47 +157,118 @@ parse_proxy_uri (char *proxy, char **scheme, char **host, char **port)
   *port = proxy;
   validate_proxy_scheme (*scheme);
   validate_proxy_host (*host);
-  validate_proxy_port (*port);
+  validate_port (*port);
 }
 
-static void
-setup_proxy (BIO *ssl)
-{
-  BIO *bio;
-  char *scheme;
-  char *proxy_host;
-  char *proxy_port;
-  if (!proxy)
-    return;
-  /*
-   * grab the proxy's host and port out of the URI we have for it. We want the
-   * underlying connect BIO to connect to this, not the target host and port, so
-   * we squirrel away the target host and port in the proxy BIO (as the proxy
-   * target) and swap out the connect BIO's target host and port so it'll
-   * connect to the proxy instead.
-   */
-  parse_proxy_uri (proxy, &scheme, &proxy_host, &proxy_port);
-  bio = BIO_new_proxy();
-  BIO_proxy_set_type (bio, scheme);
-  BIO_proxy_set_host (bio, host);
-  BIO_proxy_set_port (bio, atoi (port));
-  host = proxy_host;
-  port = proxy_port;
-  BIO_push (ssl, bio);
-}
-
+/* Returns a BIO that talks through a HTTP proxy using the CONNECT command.
+ * The created BIO will ask the proxy to CONNECT to |target_host|:|target_port|
+ * using |scheme|.
+ */
 static BIO *
-make_ssl_bio (SSL_CTX *ctx)
+BIO_create_proxy (const char *scheme, const char *target_host,
+                  const char *target_port)
 {
-  BIO *con = NULL;
-  BIO *ssl = NULL;
-  if (! (con = BIO_new (BIO_s_connect())))
-    die ("BIO_s_connect failed\n");
-  if (! (ssl = BIO_new_ssl (ctx, 1)))
+  BIO *bio_proxy = BIO_new_proxy ();
+  BIO_proxy_set_type (bio_proxy, scheme);
+  BIO_proxy_set_target_host (bio_proxy, target_host);
+  BIO_proxy_set_target_port (bio_proxy, atoi (target_port));
+  return bio_proxy;
+}
+
+/* Connects to |host| on port |port|.
+ * Returns the socket file descriptor if successful, otherwise exits with
+ * failure.
+ */
+static int create_connection (const char *host, const char *port)
+{
+  int err, sock = -1;
+  struct addrinfo *ai = NULL, *cai = NULL;
+  struct addrinfo hints = {
+      .ai_flags = AI_ADDRCONFIG,
+      .ai_family = AF_UNSPEC,
+      .ai_socktype = SOCK_STREAM,
+  };
+
+  err = getaddrinfo (host, port, &hints, &ai);
+
+  if (err != 0 || !ai)
+    die ("getaddrinfo (%s): %s\n", host, gai_strerror (err));
+
+  for (cai = ai; cai; cai = cai->ai_next)
+  {
+    sock = socket (cai->ai_family, SOCK_STREAM, 0);
+    if (sock < 0)
+    {
+      perror ("socket");
+      continue;
+    }
+
+    if (connect (sock, cai->ai_addr, cai->ai_addrlen) != 0)
+    {
+      perror ("connect");
+      close (sock);
+      sock = -1;
+      continue;
+    }
+    break;
+  }
+  freeaddrinfo (ai);
+
+  if (sock < 0)
+    die ("failed to find any remote addresses for %s:%s\n", host, port);
+
+  return sock;
+}
+
+/* Creates a BIO wrapper over the socket connection to |host|:|port|.
+ * This workaround is needed because BIO_s_connect() doesn't support IPv6.
+ */
+static BIO *BIO_create_socket (const char *host, const char *port)
+{
+  BIO *bio_socket = NULL;
+  int sockfd = create_connection (host, port);
+  if ( !(bio_socket = BIO_new_fd (sockfd, 1 /* close_flag */)))
+    die ("BIO_new_fd failed\n");
+
+  return bio_socket;
+}
+
+/* Creates an OpenSSL BIO-chain which talks to |target_host|:|target_port|
+ * using the SSL protocol. If |proxy| is set it will be used as a HTTP proxy.
+ */
+static BIO *
+make_ssl_bio (SSL_CTX *ctx, const char *target_host, const char *target_port,
+              char *proxy)
+{
+  BIO *bio_socket = NULL;
+  BIO *bio_ssl = NULL;
+  BIO *bio_proxy = NULL;
+  char *scheme = NULL;
+  char *proxy_host = NULL;
+  char *proxy_port = NULL;
+
+  if ( !(bio_ssl = BIO_new_ssl (ctx, 1)))
     die ("BIO_new_ssl failed\n");
-  setup_proxy (ssl);
-  BIO_push (ssl, con);
-  return ssl;
+
+  if (proxy)
+  {
+    verb ("V: using proxy %s\n", proxy);
+    parse_proxy_uri (proxy, &scheme, &proxy_host, &proxy_port);
+
+    if ( !(bio_proxy = BIO_create_proxy (scheme, target_host, target_port)))
+        die ("BIO_create_proxy failed\n");
+
+    bio_socket = BIO_create_socket (proxy_host, proxy_port);
+
+    BIO_push (bio_ssl, bio_proxy);
+    BIO_push (bio_ssl, bio_socket);
+  }
+  else
+  {
+    bio_socket = BIO_create_socket (target_host, target_port);
+    BIO_push (bio_ssl, bio_socket);
+  }
+  return bio_ssl;
 }
 
 /** helper function for 'malloc' */
@@ -593,7 +691,7 @@ check_name (SSL *ssl, const char *hostname)
     }
   else
     {
-      die ("hostname verification failed for host %s!\n", host);
+      die ("hostname verification failed for host %s!\n", g_host);
     }
   return ret;
 }
@@ -693,28 +791,28 @@ run_ssl (uint32_t *time_map, int time_is_an_illusion)
   SSL_load_error_strings();
   SSL_library_init();
   ctx = NULL;
-  if (0 == strcmp ("sslv23", protocol))
+  if (0 == strcmp ("sslv23", g_protocol))
     {
       verb ("V: using SSLv23_client_method()\n");
       ctx = SSL_CTX_new (SSLv23_client_method());
     }
-  else if (0 == strcmp ("sslv3", protocol))
+  else if (0 == strcmp ("sslv3", g_protocol))
     {
       verb ("V: using SSLv3_client_method()\n");
       ctx = SSL_CTX_new (SSLv3_client_method());
     }
-  else if (0 == strcmp ("tlsv1", protocol))
+  else if (0 == strcmp ("tlsv1", g_protocol))
     {
       verb ("V: using TLSv1_client_method()\n");
       ctx = SSL_CTX_new (TLSv1_client_method());
     }
   else
-    die ("Unsupported protocol `%s'\n", protocol);
+    die ("Unsupported protocol `%s'\n", g_protocol);
   if (ctx == NULL)
-    die ("OpenSSL failed to support protocol `%s'\n", protocol);
-  if (ca_racket)
+    die ("OpenSSL failed to support protocol `%s'\n", g_protocol);
+  if (g_ca_racket)
     {
-      if (-1 == stat (ca_cert_container, &statbuf))
+      if (-1 == stat (g_ca_cert_container, &statbuf))
         {
           die ("Unable to stat CA certficate container\n");
         }
@@ -723,19 +821,22 @@ run_ssl (uint32_t *time_map, int time_is_an_illusion)
           switch (statbuf.st_mode & S_IFMT)
             {
             case S_IFREG:
-              if (1 != SSL_CTX_load_verify_locations (ctx, ca_cert_container, NULL))
-                fprintf (stderr, "SSL_CTX_load_verify_locations failed\n");
+              if (1 != SSL_CTX_load_verify_locations(
+                           ctx, g_ca_cert_container, NULL))
+                fprintf(stderr, "SSL_CTX_load_verify_locations failed\n");
               break;
             case S_IFDIR:
-              if (1 != SSL_CTX_load_verify_locations (ctx, NULL, ca_cert_container))
-                fprintf (stderr, "SSL_CTX_load_verify_locations failed\n");
+              if (1 != SSL_CTX_load_verify_locations(
+                           ctx, NULL, g_ca_cert_container))
+                fprintf(stderr, "SSL_CTX_load_verify_locations failed\n");
               break;
             default:
               die ("Unable to load CA certficate container\n");
             }
         }
     }
-  if (NULL == (s_bio = make_ssl_bio (ctx)))
+  verb ("V: setting up connection to %s:%s\n", g_host, g_port);
+  if (NULL == (s_bio = make_ssl_bio(ctx, g_host, g_port, g_proxy)))
     die ("SSL BIO setup failed\n");
   BIO_get_ssl (s_bio, &ssl);
   if (NULL == ssl)
@@ -745,11 +846,7 @@ run_ssl (uint32_t *time_map, int time_is_an_illusion)
       SSL_set_info_callback (ssl, openssl_time_callback);
     }
   SSL_set_mode (ssl, SSL_MODE_AUTO_RETRY);
-  SSL_set_tlsext_host_name (ssl, host);
-  verb ("V: opening socket to %s:%s\n", host, port);
-  if ( (1 != BIO_set_conn_hostname (s_bio, host)) ||
-       (1 != BIO_set_conn_port (s_bio, port)))
-    die ("Failed to initialize connection to `%s:%s'\n", host, port);
+  SSL_set_tlsext_host_name (ssl, g_host);
   if (NULL == BIO_new_fp (stdout, BIO_NOCLOSE))
     die ("BIO_new_fp returned error, possibly: %s", strerror (errno));
   // This should run in seccomp
@@ -759,9 +856,9 @@ run_ssl (uint32_t *time_map, int time_is_an_illusion)
   if (1 != BIO_do_handshake (s_bio))
     die ("SSL handshake failed\n");
   // Verify the peer certificate against the CA certs on the local system
-  if (ca_racket)
+  if (g_ca_racket)
     {
-      inspect_key (ssl, hostname_to_verify);
+      inspect_key (ssl, g_host);
     }
   else
     {
@@ -793,19 +890,19 @@ main (int argc, char **argv)
   int leap;
   if (argc != 12)
     return 1;
-  host = argv[1];
-  hostname_to_verify = argv[1];
-  port = argv[2];
-  protocol = argv[3];
-  ca_cert_container = argv[6];
-  ca_racket = (0 != strcmp ("unchecked", argv[4]));
+  g_host = argv[1];
+  g_port = argv[2];
+  validate_port(g_port);
+  g_protocol = argv[3];
+  g_ca_cert_container = argv[6];
+  g_ca_racket = (0 != strcmp ("unchecked", argv[4]));
   verbose = (0 != strcmp ("quiet", argv[5]));
   setclock = (0 == strcmp ("setclock", argv[7]));
   showtime = (0 == strcmp ("showtime", argv[8]));
   showtime_raw = (0 == strcmp ("showtime=raw", argv[8]));
   timewarp = (0 == strcmp ("timewarp", argv[9]));
   leap = (0 == strcmp ("leapaway", argv[10]));
-  proxy = (0 == strcmp ("none", argv[11]) ? NULL : argv[11]);
+  g_proxy = (0 == strcmp ("none", argv[11]) ? NULL : argv[11]);
   clock_init_time (&warp_time, RECENT_COMPILE_DATE, 0);
   if (timewarp)
     {
