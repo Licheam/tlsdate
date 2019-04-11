@@ -26,8 +26,6 @@
 #include "src/util.h"
 #include "src/routeup.h"
 
-int verbose;
-
 /*
  * Set up the supplied context by creating and binding its netlink socket.
  * Returns 0 for success, 1 for failure.

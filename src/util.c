@@ -22,6 +22,8 @@
 #include "src/tlsdate.h"
 #include "src/util.h"
 
+int verbose;
+
 /** helper function to print message and die */
 void
 die (const char *fmt, ...)
