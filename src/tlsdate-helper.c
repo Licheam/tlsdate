@@ -78,7 +78,7 @@ know:
 #include "src/tlsdate-helper.h"
 
 #include "src/proxy-bio.h"
-
+#include "src/util.h"
 #include "src/compat/clock.h"
 
 static void
