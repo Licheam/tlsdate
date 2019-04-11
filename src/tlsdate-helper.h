@@ -106,11 +106,8 @@ uint32_t verify_signature (SSL *ssl, const char *hostname);
 void check_key_length (SSL *ssl);
 void inspect_key (SSL *ssl, const char *hostname);
 static void run_ssl (uint32_t *time_map, int time_is_an_illusion);
-void check_key_length (SSL *ssl);
 uint32_t dns_label_count (char *label, char *delim);
 uint32_t check_wildcard_match_rfc2595 (const char *orig_hostname,
                                        const char *orig_cert_wild_card);
-void inspect_key (SSL *ssl, const char *hostname);
-static void run_ssl (uint32_t *time_map, int time_is_an_illusion);
 
 #endif
