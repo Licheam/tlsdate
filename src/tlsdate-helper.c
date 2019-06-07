@@ -76,6 +76,7 @@ know:
 
 #include "config.h"
 
+#include "src/openssl_compat.h"
 #include "src/tlsdate-helper.h"
 
 #include <errno.h>
@@ -299,7 +300,11 @@ void
 openssl_time_callback (const SSL* ssl, int where, int ret)
 {
   if (where == SSL_CB_CONNECT_LOOP &&
+#if OPENSSL_VERSION_NUMBER < 0x10100000L
       (ssl->state == SSL3_ST_CR_SRVR_HELLO_A || ssl->state == SSL3_ST_CR_SRVR_HELLO_B))
+#else
+      (SSL_get_state(ssl) == TLS_ST_CR_SRVR_HELLO))
+#endif
     {
       // XXX TODO: If we want to trust the remote system for time,
       // can we just read that time out of the remote system and if the
@@ -312,7 +317,8 @@ openssl_time_callback (const SSL* ssl, int where, int ret)
       uint32_t max_reasonable_time = MAX_REASONABLE_TIME;
       uint32_t server_time;
       verb ("V: freezing time for x509 verification\n");
-      memcpy (&server_time, ssl->s3->server_random, sizeof (uint32_t));
+      SSL_get_server_random(ssl, (unsigned char *)&server_time,
+                            sizeof (uint32_t));
       if (compiled_time < ntohl (server_time)
           &&
           ntohl (server_time) < max_reasonable_time)
@@ -320,7 +326,7 @@ openssl_time_callback (const SSL* ssl, int where, int ret)
           verb ("V: remote peer provided: %d, preferred over compile time: %d\n",
                 ntohl (server_time), compiled_time);
           verb ("V: freezing time with X509_VERIFY_PARAM_set_time\n");
-          X509_VERIFY_PARAM_set_time (ssl->ctx->cert_store->param,
+          X509_VERIFY_PARAM_set_time (SSL_get0_param((SSL *)ssl),
                                       (time_t) ntohl (server_time) + 86400);
         }
       else
@@ -338,50 +344,41 @@ get_certificate_keybits (EVP_PKEY *public_key)
     In theory, we could use check_bitlen_dsa() and check_bitlen_rsa()
    */
   uint32_t key_bits;
-  switch (public_key->type)
+  switch (EVP_PKEY_id (public_key))
     {
     case EVP_PKEY_RSA:
       verb ("V: key type: EVP_PKEY_RSA\n");
-      key_bits = BN_num_bits (public_key->pkey.rsa->n);
       break;
     case EVP_PKEY_RSA2:
       verb ("V: key type: EVP_PKEY_RSA2\n");
-      key_bits = BN_num_bits (public_key->pkey.rsa->n);
       break;
     case EVP_PKEY_DSA:
       verb ("V: key type: EVP_PKEY_DSA\n");
-      key_bits = BN_num_bits (public_key->pkey.dsa->p);
       break;
     case EVP_PKEY_DSA1:
       verb ("V: key type: EVP_PKEY_DSA1\n");
-      key_bits = BN_num_bits (public_key->pkey.dsa->p);
       break;
     case EVP_PKEY_DSA2:
       verb ("V: key type: EVP_PKEY_DSA2\n");
-      key_bits = BN_num_bits (public_key->pkey.dsa->p);
       break;
     case EVP_PKEY_DSA3:
       verb ("V: key type: EVP_PKEY_DSA3\n");
-      key_bits = BN_num_bits (public_key->pkey.dsa->p);
       break;
     case EVP_PKEY_DSA4:
       verb ("V: key type: EVP_PKEY_DSA4\n");
-      key_bits = BN_num_bits (public_key->pkey.dsa->p);
       break;
     case EVP_PKEY_DH:
       verb ("V: key type: EVP_PKEY_DH\n");
-      key_bits = BN_num_bits (public_key->pkey.dh->pub_key);
       break;
     case EVP_PKEY_EC:
       verb ("V: key type: EVP_PKEY_EC\n");
-      key_bits = EVP_PKEY_bits (public_key);
       break;
       // Should we also care about EVP_PKEY_HMAC and EVP_PKEY_CMAC?
     default:
-      key_bits = 0;
       die ("unknown public key type\n");
       break;
     }
+  key_bits = EVP_PKEY_bits (public_key);
   verb ("V: keybits: %d\n", key_bits);
   return key_bits;
 }
@@ -607,7 +604,6 @@ check_san (SSL *ssl, const char *hostname)
             {
               int j;
               void *extvalstr;
-              const unsigned char *tmp;
               STACK_OF (CONF_VALUE) *val;
               CONF_VALUE *nval;
 #if OPENSSL_VERSION_NUMBER >= 0x10000000L
@@ -618,16 +614,7 @@ check_san (SSL *ssl, const char *hostname)
                 {
                   break;
                 }
-              tmp = ext->value->data;
-              if (method->it)
-                {
-                  extvalstr = ASN1_item_d2i (NULL, &tmp, ext->value->length,
-                                             ASN1_ITEM_ptr (method->it));
-                }
-              else
-                {
-                  extvalstr = method->d2i (NULL, &tmp, ext->value->length);
-                }
+              extvalstr = X509V3_EXT_d2i(ext);
               if (!extvalstr)
                 {
                   break;
@@ -744,13 +731,13 @@ check_key_length (SSL *ssl)
       verb ("V: public key is ready for inspection\n");
     }
   key_bits = get_certificate_keybits (public_key);
-  if (MIN_PUB_KEY_LEN >= key_bits && public_key->type != EVP_PKEY_EC)
+  if (MIN_PUB_KEY_LEN >= key_bits && EVP_PKEY_id(public_key) != EVP_PKEY_EC)
     {
       die ("Unsafe public key size: %d bits\n", key_bits);
     }
   else
     {
-      if (public_key->type == EVP_PKEY_EC)
+      if (EVP_PKEY_id(public_key) == EVP_PKEY_EC)
         if (key_bits >= MIN_ECC_PUB_KEY_LEN
             && key_bits <= MAX_ECC_PUB_KEY_LEN)
           {
@@ -791,6 +778,8 @@ run_ssl (uint32_t *time_map, int time_is_an_illusion)
   SSL_load_error_strings();
   SSL_library_init();
   ctx = NULL;
+
+#if OPENSSL_VERSION_NUMBER < 0x10100000L
   if (0 == strcmp ("sslv23", g_protocol))
     {
       verb ("V: using SSLv23_client_method()\n");
@@ -808,6 +797,16 @@ run_ssl (uint32_t *time_map, int time_is_an_illusion)
     }
   else
     die ("Unsupported protocol `%s'\n", g_protocol);
+#else /* OPENSSL_VERSION_NUMBER < 0x10100000L */
+  /*
+   * Use general-purpose version-flexible SSL/TLS method. The actual protocol
+   * version used will be negotiated to the highest version mutually supported
+   * by the client and the server.
+   */
+  verb ("V: using TLS_client_method()\n");
+  ctx = SSL_CTX_new(TLS_client_method());
+#endif /* OPENSSL_VERSION_NUMBER < 0x10100000L */
+
   if (ctx == NULL)
     die ("OpenSSL failed to support protocol `%s'\n", g_protocol);
   if (g_ca_racket)
@@ -867,7 +866,7 @@ run_ssl (uint32_t *time_map, int time_is_an_illusion)
   check_key_length (ssl);
   // from /usr/include/openssl/ssl3.h
   //  ssl->s3->server_random is an unsigned char of 32 bits
-  memcpy (time_map, ssl->s3->server_random, sizeof (uint32_t));
+  SSL_get_server_random(ssl, (unsigned char *)time_map, sizeof(uint32_t));
   SSL_free (ssl);
   SSL_CTX_free (ctx);
 }

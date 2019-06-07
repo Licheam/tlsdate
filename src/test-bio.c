@@ -15,6 +15,7 @@
 #include <assert.h>
 #include <string.h>
 
+#include "src/openssl_compat.h"
 #include "src/test-bio.h"
 #include "src/util.h"
 
@@ -31,7 +32,7 @@ struct test_ctx
 
 static struct test_ctx *bio_ctx (BIO *b)
 {
-  struct test_ctx *ctx = b->ptr;
+  struct test_ctx *ctx = BIO_get_data(b);
   assert (ctx->magic == kMagic);
   return ctx;
 }
@@ -67,16 +68,16 @@ int test_new (BIO *b)
   ctx->insz = 0;
   ctx->out = NULL;
   ctx->outsz = 0;
-  b->init = 1;
-  b->flags = 0;
-  b->ptr = ctx;
+  BIO_set_init(b, 1);
+  BIO_clear_flags(b, ~0);
+  BIO_set_data(b, ctx);
   return 1;
 }
 
 int test_free (BIO *b)
 {
   struct test_ctx *ctx;
-  if (!b || !b->ptr)
+  if (!b || !BIO_get_data(b))
     return 1;
   ctx = bio_ctx (b);
   free (ctx->in);
@@ -111,6 +112,8 @@ long test_callback_ctrl (BIO *b, int cmd, bio_info_cb *fp)
   return 0;
 }
 
+#if OPENSSL_VERSION_NUMBER < 0x10100000L
+
 BIO_METHOD test_methods =
 {
   BIO_TYPE_SOCKET,
@@ -129,6 +132,33 @@ BIO_METHOD *BIO_s_test()
 {
   return &test_methods;
 }
+
+#else
+
+BIO_METHOD *BIO_s_test()
+{
+  /* We leak a singleton BIO_METHOD here. */
+  static BIO_METHOD *test_method;
+
+  if (!test_method) {
+    int index;
+
+    index = BIO_get_new_index() | BIO_TYPE_SOURCE_SINK | BIO_TYPE_DESCRIPTOR;
+    test_method = BIO_meth_new (index, "test");
+    BIO_meth_set_write (test_method, test_write);
+    BIO_meth_set_read (test_method, test_read);
+    BIO_meth_set_puts (test_method, NULL);
+    BIO_meth_set_gets (test_method, NULL);
+    BIO_meth_set_ctrl (test_method, test_ctrl);
+    BIO_meth_set_create (test_method, test_new);
+    BIO_meth_set_destroy (test_method, test_free);
+    BIO_meth_set_callback_ctrl (test_method, test_callback_ctrl);
+  }
+
+  return test_method;
+}
+
+#endif
 
 BIO API *BIO_new_test()
 {
