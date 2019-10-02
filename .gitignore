@@ -36,3 +36,4 @@ src/tlsdated_unittest
 TAGS
 config.h
 config.in
+src/bindings
