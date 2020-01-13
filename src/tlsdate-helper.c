@@ -779,33 +779,41 @@ run_ssl (uint32_t *time_map, int time_is_an_illusion)
   SSL_library_init();
   ctx = NULL;
 
-#if OPENSSL_VERSION_NUMBER < 0x10100000L
   if (0 == strcmp ("sslv23", g_protocol))
     {
       verb ("V: using SSLv23_client_method()\n");
       ctx = SSL_CTX_new (SSLv23_client_method());
     }
+#ifndef OPENSSL_NO_SSL3_METHOD
   else if (0 == strcmp ("sslv3", g_protocol))
     {
       verb ("V: using SSLv3_client_method()\n");
       ctx = SSL_CTX_new (SSLv3_client_method());
     }
+#endif
+#ifndef OPENSSL_NO_TLS1_METHOD
   else if (0 == strcmp ("tlsv1", g_protocol))
     {
       verb ("V: using TLSv1_client_method()\n");
       ctx = SSL_CTX_new (TLSv1_client_method());
     }
+#endif
+#ifndef OPENSSL_NO_TLS1_1_METHOD
+  else if (0 == strcmp ("tlsv11", g_protocol))
+    {
+      verb ("V: using TLSv1_1_client_method()\n");
+      ctx = SSL_CTX_new (TLSv1_1_client_method());
+    }
+#endif
+#ifndef OPENSSL_NO_TLS1_2_METHOD
+  else if (0 == strcmp ("tlsv12", g_protocol))
+    {
+      verb ("V: using TLSv1_2_client_method()\n");
+      ctx = SSL_CTX_new (TLSv1_2_client_method());
+    }
+#endif
   else
     die ("Unsupported protocol `%s'\n", g_protocol);
-#else /* OPENSSL_VERSION_NUMBER < 0x10100000L */
-  /*
-   * Use general-purpose version-flexible SSL/TLS method. The actual protocol
-   * version used will be negotiated to the highest version mutually supported
-   * by the client and the server.
-   */
-  verb ("V: using TLS_client_method()\n");
-  ctx = SSL_CTX_new(TLS_client_method());
-#endif /* OPENSSL_VERSION_NUMBER < 0x10100000L */
 
   if (ctx == NULL)
     die ("OpenSSL failed to support protocol `%s'\n", g_protocol);

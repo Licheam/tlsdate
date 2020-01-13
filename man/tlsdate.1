@@ -5,8 +5,9 @@
 .SH NAME
 tlsdate \- secure parasitic rdate replacement
 .SH SYNOPSIS
-.B tlsdate [\-hnvVstl] [\-H [hostname]] [\-p [port]] [\-P [sslv23|sslv3|tlsv1]] \
-[\-\-certdir [dirname]] [\-x [\-\-proxy] proxy\-type://proxyhost:proxyport]
+.B tlsdate [\-hnvVstl] [\-H [hostname]] [\-p [port]] \
+[\-P [sslv23|sslv3|tlsv1|tlsv11|tlsv12]] [\-\-certdir [dirname]] \
+[\-x [\-\-proxy] proxy\-type://proxyhost:proxyport]
 .SH DESCRIPTION
 .B tlsdate
 is a tool for setting the system clock by hand or by communication
@@ -30,8 +31,8 @@ Set remote hostname (default: 'www.ptb.de')
 Do not set the system clock to the time of the remote server
 .IP "\-p | \-\-port [port]"
 Set remote port (default: '443')
-.IP "\-P | \-\-protocol [sslv23|sslv3|tlsv1]"
-Set protocol to use when communicating with server (default: 'tlsv1')
+.IP "\-P | \-\-protocol [sslv23|sslv3|tlsv1|tlsv11|tlsv12]"
+Set protocol to use when communicating with server (default: 'tlsv12')
 .IP "\-C | \-\-certdir [dirname]"
 Set the local directory where certificates are located
 (default: '/etc/ssl/certs')
