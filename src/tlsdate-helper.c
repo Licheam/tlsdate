@@ -176,6 +176,26 @@ BIO_create_proxy (const char *scheme, const char *target_host,
   return bio_proxy;
 }
 
+static void
+addr_to_str (const struct sockaddr *addr, char* dest,
+                         socklen_t size)
+{
+  struct sockaddr_in* addr_ipv4 = NULL;
+  struct sockaddr_in6* addr_ipv6 = NULL;
+  memset (dest, '\0', size);
+  if (addr->sa_family == AF_INET) {
+    addr_ipv4 = (struct sockaddr_in*)addr;
+    inet_ntop (AF_INET, &addr_ipv4->sin_addr, dest, size);
+    return;
+  }
+  if (addr->sa_family == AF_INET6) {
+    addr_ipv6 = (struct sockaddr_in6*)addr;
+    inet_ntop (AF_INET6, &addr_ipv6->sin6_addr, dest, size);
+    return;
+  }
+  verb ("V: unknown sa_family %hu\n", addr->sa_family);
+}
+
 /* Connects to |host| on port |port|.
  * Returns the socket file descriptor if successful, otherwise exits with
  * failure.
@@ -189,6 +209,10 @@ static int create_connection (const char *host, const char *port)
       .ai_family = AF_UNSPEC,
       .ai_socktype = SOCK_STREAM,
   };
+  // Use INET6_ADDRSTRLEN for the buffer holding IP addresses as it will always
+  // be longer than INET_ADDRSTRLEN.
+  char addr_str_buf[INET6_ADDRSTRLEN];
+  memset (addr_str_buf, '\0', INET6_ADDRSTRLEN);
 
   err = getaddrinfo (host, port, &hints, &ai);
 
@@ -197,6 +221,8 @@ static int create_connection (const char *host, const char *port)
 
   for (cai = ai; cai; cai = cai->ai_next)
   {
+    addr_to_str (cai->ai_addr, addr_str_buf, INET6_ADDRSTRLEN);
+    verb ("V: attempting to connect to %s\n", addr_str_buf);
     sock = socket (cai->ai_family, SOCK_STREAM, 0);
     if (sock < 0)
     {
@@ -858,8 +884,10 @@ run_ssl (uint32_t *time_map, int time_is_an_illusion)
     die ("BIO_new_fp returned error, possibly: %s", strerror (errno));
   // This should run in seccomp
   // eg:     prctl(PR_SET_SECCOMP, 1);
+  verb ("V: BIO_do_connect\n");
   if (1 != BIO_do_connect (s_bio)) // XXX TODO: BIO_should_retry() later?
     die ("SSL connection failed\n");
+  verb ("V: BIO_do_handshake\n");
   if (1 != BIO_do_handshake (s_bio))
     die ("SSL handshake failed\n");
   // Verify the peer certificate against the CA certs on the local system
