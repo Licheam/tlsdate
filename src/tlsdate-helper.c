@@ -805,6 +805,14 @@ run_ssl (uint32_t *time_map, int time_is_an_illusion)
   SSL_library_init();
   ctx = NULL;
 
+  /*
+   * Some of the XYZ_method() calls below are marked deprecated. We still want
+   * to use them for compatibility reasons, so silence the warnings or they'll
+   * break the build.
+   */
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+
   if (0 == strcmp ("sslv23", g_protocol))
     {
       verb ("V: using SSLv23_client_method()\n");
@@ -840,6 +848,8 @@ run_ssl (uint32_t *time_map, int time_is_an_illusion)
 #endif
   else
     die ("Unsupported protocol `%s'\n", g_protocol);
+
+#pragma GCC diagnostic pop
 
   if (ctx == NULL)
     die ("OpenSSL failed to support protocol `%s'\n", g_protocol);
