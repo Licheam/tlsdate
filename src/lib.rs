@@ -4,4 +4,4 @@
 
 // Imports the Rust D-Bus bindings for tlsdate.
 
-include!(concat!(env!("OUT_DIR"), "/include_modules.rs"));
+include!("bindings/include_modules.rs");

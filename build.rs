@@ -6,13 +6,16 @@
 
 use std::path::Path;
 
-use chromeos_dbus_bindings::{self, generate_module};
+use chromeos_dbus_bindings::{self, generate_module, BindingsType};
 
 const SOURCE_DIR: &str = ".";
 
 // (<module name>, <relative path to source xml>)
-const BINDINGS_TO_GENERATE: &[(&str, &str)] =
-    &[("org_torproject_tlsdate", "dbus/org.torproject.tlsdate.xml")];
+const BINDINGS_TO_GENERATE: &[(&str, &str, BindingsType)] = &[(
+    "org_torproject_tlsdate",
+    "dbus/org.torproject.tlsdate.xml",
+    BindingsType::Client,
+)];
 
 fn main() {
     generate_module(Path::new(SOURCE_DIR), BINDINGS_TO_GENERATE).unwrap();
