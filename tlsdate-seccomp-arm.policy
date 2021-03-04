@@ -39,6 +39,7 @@ restart_syscall: 1
 setsockopt: 1
 setresgid32: 1
 nanosleep: 1
+clock_nanosleep: 1
 exit: 1
 rt_sigreturn: 1
 rename: 1

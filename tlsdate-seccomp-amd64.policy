@@ -41,6 +41,7 @@ bind: 1
 recvfrom: 1
 setresuid: 1
 nanosleep: 1
+clock_nanosleep: 1
 clock_gettime: 1
 clock_settime: 1
 futex: 1
