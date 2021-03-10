@@ -106,6 +106,7 @@ usage (const char *progn)
   printf ("  -g <grp>  group to change to\n");
   printf ("  -v        be verbose\n");
   printf ("  -x <h>    set proxy for subprocs to h\n");
+  printf ("  -o        exit after running once for testing\n");
   printf ("  -h        this\n");
 }
 
@@ -132,6 +133,7 @@ set_conf_defaults (struct opts *opts)
   opts->should_load_disk = DEFAULT_LOAD_FROM_DISK;
   opts->should_save_disk = DEFAULT_SAVE_TO_DISK;
   opts->should_netlink = DEFAULT_USE_NETLINK;
+  opts->should_run_once = DEFAULT_RUN_ONCE;
   opts->dry_run = DEFAULT_DRY_RUN;
   opts->jitter = 0;
   opts->conf_file = NULL;
@@ -144,7 +146,7 @@ void
 parse_argv (struct opts *opts, int argc, char *argv[])
 {
   int opt;
-  while ((opt = getopt (argc, argv, "hwrpt:d:T:D:c:a:lsvm:j:f:x:u:g:")) != -1)
+  while ((opt = getopt (argc, argv, "hwrpt:d:T:D:c:a:lsvm:j:f:x:u:g:o")) != -1)
     {
       switch (opt)
         {
@@ -201,6 +203,9 @@ parse_argv (struct opts *opts, int argc, char *argv[])
           break;
         case 'g':
           opts->group = optarg;
+          break;
+        case 'o':
+          opts->should_run_once = 1;
           break;
         case 'h':
         default:
@@ -352,6 +357,10 @@ load_conf (struct opts *opts)
       else if (!strcmp (e->key, "should-netlink"))
         {
           opts->should_netlink = e->value ? !strcmp (e->value, "yes") : 1;
+        }
+      else if (!strcmp (e->key, "should-run-once"))
+        {
+          opts->should_run_once = e->value ? !strcmp (e->value, "yes") : 1;
         }
       else if (!strcmp (e->key, "dry-run"))
         {

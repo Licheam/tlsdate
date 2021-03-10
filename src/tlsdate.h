@@ -49,6 +49,7 @@
 #define DEFAULT_SAVE_TO_DISK 1
 #define DEFAULT_USE_NETLINK 1
 #define DEFAULT_DRY_RUN 0
+#define DEFAULT_RUN_ONCE 0
 #define MAX_SANE_BACKOFF (10*60) /* exponential backoff should only go this far */
 
 #ifndef TLSDATED_MAX_DATE
@@ -116,6 +117,7 @@ struct opts
   int should_load_disk;
   int should_save_disk;
   int should_netlink;
+  int should_run_once;
   int dry_run;
   int jitter;
   char *conf_file;

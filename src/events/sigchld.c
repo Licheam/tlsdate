@@ -52,6 +52,18 @@ handle_child_process_termination (struct state *state)
         "pid:%d uid:%d status:%d code:%d", __func__,
         info.si_pid, info.si_uid, info.si_status, info.si_code);
 
+  if (state->opts.should_run_once)
+    {
+      if (event_base_loopbreak (state->base))
+        {
+          error ("[event:%s] failed to exit tlsdate for option -o!", __func__);
+        }
+      else
+        {
+          info ("[event:%s] exited tlsdate for option -o", __func__);
+        }
+      return 1;
+    }
   /* If it was still active, remove it. */
   event_del (state->events[E_TLSDATE_TIMEOUT]);
   state->running = 0;
