@@ -18,7 +18,7 @@
 
 /* Returns 1 if a death was handled, otherwise 0. */
 int
-handle_child_death (struct state *state)
+handle_child_process_termination (struct state *state)
 {
   siginfo_t info;
   int ret;
@@ -95,8 +95,10 @@ handle_child_stop (struct state *state)
     }
   if (info.si_pid == 0)
     return 0;
-  info ("[event:%s] a child has been STOPPED or CONTINUED. Killing it.",
-         __func__);
+  info(
+      "[event:%s] a child process has been STOPPED or CONTINUED. Terminating "
+      "it.",
+      __func__);
   /* Kill it then catch the next SIGCHLD. */
   if (kill (info.si_pid, SIGKILL))
     {
@@ -104,7 +106,7 @@ handle_child_stop (struct state *state)
         fatal ("[event:%s] cannot terminate STOPPED privileged child",
                __func__);
       if (errno == ESRCH)
-        info ("[event:%s] child gone before we could kill it",
+        info ("[event:%s] child process gone before we could terminate it",
               __func__);
     }
   return 1;
@@ -118,9 +120,9 @@ action_sigchld (evutil_socket_t fd, short what, void *arg)
   /* Process SIGCHLDs in two steps: death and stopped until all
    * pending children are sorted.
    */
-  if (!handle_child_death (state) && !handle_child_stop (state))
+  if (!handle_child_process_termination (state) && !handle_child_stop (state))
     info ("[event:%s] SIGCHLD fired but no children ready!", __func__);
-  while (handle_child_death (state) || handle_child_stop (state));
+  while (handle_child_process_termination (state) || handle_child_stop (state));
 }
 
 int
