@@ -100,6 +100,28 @@ enable_setter_seccomp (void)
     SC_DENY (mmap2, EINVAL),
 #endif
 
+#ifdef __NR_clock_adjtime
+    SC_ALLOW(clock_adjtime),
+#endif
+#ifdef __NR_clock_adjtime64
+    SC_ALLOW(clock_adjtime64),
+#endif
+#ifdef __NR_clock_gettime
+    SC_ALLOW(clock_gettime),
+#endif
+#ifdef __NR_clock_gettime64
+    SC_ALLOW(clock_gettime64),
+#endif
+#ifdef __NR_clock_settime
+    SC_ALLOW(clock_settime),
+#endif
+#ifdef __NR_clock_settime64
+    SC_ALLOW(clock_settime64),
+#endif
+#ifdef __NR_llseek
+    SC_ALLOW(_llseek),
+#endif
+
     SC_ALLOW (lseek),
     SC_ALLOW (close),
     SC_ALLOW (munmap),
