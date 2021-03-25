@@ -196,14 +196,35 @@ addr_to_str (const struct sockaddr *addr, char* dest,
   verb ("V: unknown sa_family %hu\n", addr->sa_family);
 }
 
+static int
+get_addrinfo_length (struct addrinfo *addr_infos) {
+  int result = 0;
+  for (struct addrinfo *iter = addr_infos; iter; iter = iter->ai_next) {
+    ++result;
+  }
+  return result;
+}
+
+static struct addrinfo *
+get_addrinfo_element (struct addrinfo *addr_infos, int index) {
+  int current_index = 0;
+  for (struct addrinfo *iter = addr_infos; iter; iter = iter->ai_next) {
+    if (current_index == index) {
+      return iter;
+    }
+    ++current_index;
+  }
+  return NULL;
+}
+
 /* Connects to |host| on port |port|.
  * Returns the socket file descriptor if successful, otherwise exits with
  * failure.
  */
-static int create_connection (const char *host, const char *port)
+static int
+create_connection (const char *host, const char *port)
 {
-  int err, sock = -1;
-  struct addrinfo *ai = NULL, *cai = NULL;
+  int sock = -1;
   struct addrinfo hints = {
       .ai_flags = AI_ADDRCONFIG,
       .ai_family = AF_UNSPEC,
@@ -214,23 +235,35 @@ static int create_connection (const char *host, const char *port)
   char addr_str_buf[INET6_ADDRSTRLEN];
   memset (addr_str_buf, '\0', INET6_ADDRSTRLEN);
 
-  err = getaddrinfo (host, port, &hints, &ai);
-
-  if (err != 0 || !ai)
+  struct addrinfo *addr_infos = NULL;
+  int err = getaddrinfo (host, port, &hints, &addr_infos);
+  if (err != 0 || !addr_infos)
     die ("getaddrinfo (%s): %s\n", host, gai_strerror (err));
 
-  for (cai = ai; cai; cai = cai->ai_next)
+  int list_length = get_addrinfo_length (addr_infos);
+  for (int i = 0; i < list_length; ++i)
   {
-    addr_to_str (cai->ai_addr, addr_str_buf, INET6_ADDRSTRLEN);
+    // tlsdate is killed by a supervisor if it takes too long to finish. So it
+    // may not have time to try all the addresses. Selecting randomly makes
+    // it try different addresses during different attempts, that is usefull
+    // when some addresses are not accessible (e.g. first ones).
+    struct addrinfo *current_addr_info =
+        get_addrinfo_element (addr_infos, random () % list_length);
+    if (!current_addr_info) {
+      die ("attempted to use NULL addrinfo");
+    }
+
+    addr_to_str (current_addr_info->ai_addr, addr_str_buf, INET6_ADDRSTRLEN);
     verb ("V: attempting to connect to %s\n", addr_str_buf);
-    sock = socket (cai->ai_family, SOCK_STREAM, 0);
+    sock = socket (current_addr_info->ai_family, SOCK_STREAM, 0);
     if (sock < 0)
     {
       perror ("socket");
       continue;
     }
 
-    if (connect (sock, cai->ai_addr, cai->ai_addrlen) != 0)
+    if (connect (sock, current_addr_info->ai_addr,
+                 current_addr_info->ai_addrlen) != 0)
     {
       perror ("connect");
       close (sock);
@@ -239,7 +272,7 @@ static int create_connection (const char *host, const char *port)
     }
     break;
   }
-  freeaddrinfo (ai);
+  freeaddrinfo (addr_infos);
 
   if (sock < 0)
     die ("failed to find any remote addresses for %s:%s\n", host, port);
@@ -947,6 +980,7 @@ main (int argc, char **argv)
   timewarp = (0 == strcmp ("timewarp", argv[9]));
   leap = (0 == strcmp ("leapaway", argv[10]));
   g_proxy = (0 == strcmp ("none", argv[11]) ? NULL : argv[11]);
+  srandom(time(NULL));
   clock_init_time (&warp_time, RECENT_COMPILE_DATE, 0);
   if (timewarp)
     {
