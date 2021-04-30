@@ -121,6 +121,12 @@ enable_setter_seccomp (void)
 #ifdef __NR_llseek
     SC_ALLOW(_llseek),
 #endif
+#ifdef __NR_poll
+    SC_ALLOW(poll),
+#endif
+#ifdef __NR_ppoll
+    SC_ALLOW(ppoll),
+#endif
 
     SC_ALLOW (lseek),
     SC_ALLOW (close),
