@@ -240,15 +240,17 @@ create_connection (const char *host, const char *port)
   if (err != 0 || !addr_infos)
     die ("getaddrinfo (%s): %s\n", host, gai_strerror (err));
 
+  // tlsdate is killed by a supervisor if it takes too long to finish. So it
+  // may not have time to try all the addresses. Selecting the start point
+  // randomly makes it try different addresses during different attempts, that
+  // is useful when some addresses are not accessible (e.g. first ones).
   int list_length = get_addrinfo_length (addr_infos);
+  int start_index = random () % list_length;
+
   for (int i = 0; i < list_length; ++i)
   {
-    // tlsdate is killed by a supervisor if it takes too long to finish. So it
-    // may not have time to try all the addresses. Selecting randomly makes
-    // it try different addresses during different attempts, that is usefull
-    // when some addresses are not accessible (e.g. first ones).
     struct addrinfo *current_addr_info =
-        get_addrinfo_element (addr_infos, random () % list_length);
+        get_addrinfo_element (addr_infos, (start_index + i) % list_length);
     if (!current_addr_info) {
       die ("attempted to use NULL addrinfo");
     }
