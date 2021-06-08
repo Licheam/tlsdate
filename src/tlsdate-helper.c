@@ -135,8 +135,9 @@ validate_port (const char *port)
     return;
   char *end;
   const int kBase = 10;
+  errno = 0;
   unsigned long value = strtoul(port, &end, kBase);
-  if (errno != 0 || value > SHRT_MAX || value == 0 || *end != '\0')
+  if (errno != 0 || value > USHRT_MAX || value == 0 || *end != '\0')
     die("invalid port %s\n", port);
 }
 
