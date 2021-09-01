@@ -7,7 +7,7 @@ exclude = ["*"]
 include = ["Cargo.toml", "build.rs", "src/lib.rs", "src/bindings/*"]
 
 [build-dependencies]
-chromeos-dbus-bindings = { path = "../../platform2/chromeos-dbus-bindings"} # provided by ebuild
+chromeos-dbus-bindings = { path = "../../platform2/chromeos-dbus-bindings" } # provided by ebuild
 
 [dependencies]
 dbus = "0.9"

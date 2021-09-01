@@ -14,7 +14,7 @@ const SOURCE_DIR: &str = ".";
 const BINDINGS_TO_GENERATE: &[(&str, &str, BindingsType)] = &[(
     "org_torproject_tlsdate",
     "dbus/org.torproject.tlsdate.xml",
-    BindingsType::Client,
+    BindingsType::Client(None),
 )];
 
 fn main() {
