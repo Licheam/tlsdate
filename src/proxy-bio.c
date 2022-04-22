@@ -321,11 +321,9 @@ int proxy_read (BIO *b, char *buf, int sz)
 long proxy_ctrl (BIO *b, int cmd, long num, void *ptr)
 {
   long ret;
-  struct proxy_ctx *ctx;
   if (!BIO_next(b))
     return 0;
-  ctx = BIO_get_data(b);
-  assert (ctx);
+  assert (BIO_get_data(b));
   switch (cmd)
     {
     case BIO_C_DO_STATE_MACHINE:
