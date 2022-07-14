@@ -128,6 +128,10 @@ enable_setter_seccomp (void)
     SC_ALLOW(ppoll),
 #endif
 
+#ifdef __NR_rseq
+    SC_ALLOW(rseq),
+#endif
+
     SC_ALLOW (lseek),
     SC_ALLOW (close),
     SC_ALLOW (munmap),
